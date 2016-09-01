@@ -1,116 +1,195 @@
+void(function(){
 "use strict";
-
-if (!window.Worker || window.forceIframeWorker) {
-	if (window.Worker) window.nativeWorker = window.Worker;
+var nativeWorker = window.Worker;
+if(nativeWorker && nativeWorker.notNative) return;
+if(nativeWorker && !nativeWorker.forceIframeWorker) return;
+void(function(){
+	var MessageEvent = function(data,target){
+		this.data = data;
+		this.type="message";
+		if(typeof target !== typeof void(0)){
+			this.currentTarget = target;
+			this.timeStamp = (new Date()).getTime();
+			this.srcElement = target;
+			this.target = target;
+		}
+	};
+	var toAbsPath = function(rPath){
+		var div =document.createElement(div);
+		div.innerHTML = '<a href="'+rPath+'">attr<\/a>';
+		return div.getElementsByTagName('a')[0].href;
+	};
+	var pathJoin = function(left,right){
+		var href;
+		if(/^\//.test(right)){
+			href = right;
+		}else{
+			href = (left.match(/[\s\S]+\//)||[''])[0] + right;
+		}
+		return toAbsPath(href);
+	};
+	var cXHR = function(){
+		var contentWindow = this;
+		var Xhr;
+		if(typeof contentWindow.XMLHttpRequest !== typeof void 0){
+			Xhr = function(){
+				return new XMLHttpRequest();
+			};
+		}else if(typeof contentWindow.ActiveXObject !== typeof void 0){
+			Xhr = function(){
+				return new ActiveXObject('Microsoft.XMLHTTP');
+			};
+		}else{
+			throw new Error('your client do not implement XMLHttpRequest');
+		}
+		return Xhr;
+	};
+//init------------------------------------------------------------------------------
 	window.Worker = function (script) {
-		var worker = this;
+		var thisWorker = this;
+
+		//some interfaces for worker object
+		thisWorker.onmessage = thisWorker.onerror = null;
 
 		// prepare and inject iframe
-		worker._iframeEl = document.createElement('iframe');
-		worker._iframeEl.style.visibility = 'hidden';
-		worker._iframeEl.style.width = '1px';
-		worker._iframeEl.style.height = '1px';
-		worker._iframeEl.onload = worker._iframeEl.onreadystatechange = function () {
+		thisWorker._currentPath = pathJoin(window.Worker.baseURI,script);//pach
+		thisWorker._iframeEl = document.createElement('iframe');//iframe element
+		thisWorker._quere = [];
+		thisWorker._unloaded = false;
+
+		//styles
+		thisWorker._iframeEl.style.visibility = 'hidden';
+		thisWorker._iframeEl.style.width = '1px';
+		thisWorker._iframeEl.style.height = '1px';
+		thisWorker._iframeEl.style.position = 'absolute';
+
+		//onload
+		thisWorker._iframeEl.onload = thisWorker._iframeEl.onreadystatechange = function () {
 			if (this.readyState && this.readyState !== "loaded" && this.readyState !== "complete") return;
-			worker._iframeEl.onload = worker._iframeEl.onreadystatechange = null;
-			var w = this.contentWindow,
-			doc = this.contentWindow.document;
-			
-			function injectScript(script, callback) {
+			thisWorker._iframeEl.onload = thisWorker._iframeEl.onreadystatechange = null;
+
+			var contentWindow = this.contentWindow;//window object of iframe
+			var getSync = (function(){
+				var getXhr = cXHR.call(contentWindow);
+				return function(url){
+					var request = getXhr();
+					request.open('GET',url,false);
+					request.send(null);
+					return request.responseText;
+				};
+			})();
+			var loadScript = function(path){
+				var outerFileCodes = 
+				//'with({postMessage:workerPostMessage,close:workerClose}){'+getSync(path)+'}'+
+				getSync(path)+
+				'\n\n//# sourceURL='+path;
+				try{
+					contentWindow['eval'](outerFileCodes);
+				}catch(er){
+					console.error(er.stack||er);
+					if(thisWorker.onerror){
+						thisWorker.onerror(er);
+					}
+					if(contentWindow.onerror){
+						contentWindow.onerror.call(contentWindow,er);
+					}
+				}
+			};
+
+			// Some interfaces within the Worker scope.
+			contentWindow.Worker = window.Worker; // yes, worker could spawn another worker!
+			contentWindow.importScripts = function () {
+				for (var i = 0; i < arguments.length; i++) {
+					//injectScript(pathJoin(worker._currentPath, arguments[i]));
+					var path = pathJoin(thisWorker._currentPath, arguments[i]);
+					loadScript(path);
+				}
+			};
+			contentWindow.onmessage = contentWindow.onerror = null; // placeholder function
+			contentWindow.workerPostMessage = function (data) {
+				if (typeof thisWorker.onmessage === 'function') {
+					thisWorker.onmessage.call(thisWorker,new MessageEvent(data,thisWorker));
+				}
+			};
+			contentWindow.workerClose = function () {
+				thisWorker.terminate();
+			};
+
+			// inject worker script into iframe
+			setTimeout(function(){
+				loadScript(toAbsPath(script));
+				thisWorker._quere.push = function (callback) {
+					if (!thisWorker._unloaded) {
+						callback();
+					}
+				};
+				if (!thisWorker._unloaded) {
+					while (thisWorker._quere.length) {
+						(thisWorker._quere.shift())();
+					}
+				}
+			},0);
+			/*var injectScript = function(script, callback) {
+				var doc = contentWindow.document;
 				var scriptEl = doc.createElement('script');
 				scriptEl.src = script;
 				scriptEl.type = 'text/javascript';
 				scriptEl.onload = scriptEl.onreadystatechange = function () {
 					if (scriptEl.readyState && scriptEl.readyState !== "loaded" && scriptEl.readyState !== "complete") return;
 					scriptEl.onload = scriptEl.onreadystatechange = null;
-					doc.body.removeChild(scriptEl);
 					scriptEl = null;
 					if (callback) {
 						callback();
 					}
 				};
 				doc.body.appendChild(scriptEl);
-			}
-
-			// Some interfaces within the Worker scope.
-			
-			w.Worker = window.Worker; // yes, worker could spawn another worker!
-			w.onmessage = function (ev) {}; // placeholder function
-			var postMessage = function (data) {
-				if (typeof worker.onmessage === 'function') {
-					worker.onmessage.call(
-						worker,
-						{
-							currentTarget: worker,
-							timeStamp: (new Date()).getTime(),
-							srcElement: worker,
-							target: worker,
-							data: data
-						}
-					);
-				}
 			};
-			w.postMessage = w.workerPostMessage = postMessage;
-			if (w.postMessage !== postMessage) {
-				// IE doesn't allow overwriting postMessage
-			}
-			w.close = function () {
-				worker.terminate();
-			};
-			w.importScripts = function () {
-				for (var i = 0; i < arguments.length; i++) {
-					injectScript(window.Worker.baseURI + arguments[i]);
-				}
-			}
-
-			// inject worker script into iframe			
-			injectScript(window.Worker.baseURI + script, function () {
-				worker._quere.push = function (callback) {
-					if (!worker._unloaded) {
+			injectScript(thisWorker._currentPath, function () {
+				thisWorker._quere.push = function (callback) {
+					if (!thisWorker._unloaded) {
 						callback();
 					}
 				};
-				if (!worker._unloaded) {
-					while (worker._quere.length) {
-						(worker._quere.shift())();
+				if (!thisWorker._unloaded) {
+					while (thisWorker._quere.length) {
+						(thisWorker._quere.shift())();
 					}
 				}
-			});
+			});*/
 		};
+
+		//load iframe
 		this._iframeEl.src = window.Worker.iframeURI;
-		(document.getElementsByTagName('head')[0] || document.body).appendChild(this._iframeEl);
-		
-		worker._quere = [];
-		worker._unloaded = false;
+		;(document.head||document.getElementsByTagName('head')[0]).appendChild(this._iframeEl);
 	};
 	window.Worker.prototype.postMessage = function (obj) {
-		var worker = this;
-		setTimeout(
-			function () {
-				worker._quere.push(
-					function () {
-						// IE8 throws an error if we call worker._iframeEl.contentWindow.onmessage() directly
-						var win = worker._iframeEl.contentWindow, onmessage = win.onmessage;
-						onmessage.call(win, {data:obj});
-					}
-				);
-			},
-			0
-		);
+		var thisWorker = this;
+		setTimeout(function () {
+			thisWorker._quere.push(function () {
+				// IE8 throws an error if we call worker._iframeEl.contentWindow.onmessage() directly
+				var win = thisWorker._iframeEl.contentWindow;
+				if(win.onmessage){
+					win.onmessage.call(win,new MessageEvent(obj));
+				}
+			});
+		},0);
 	};
 	window.Worker.prototype.terminate = function () {
 		if (!this._unloaded) {
-			(document.getElementsByTagName('head')[0] || document.body).removeChild(this._iframeEl);
+			(document.head||document.getElementsByTagName('head')[0]).removeChild(this._iframeEl);
 		}
 		this._iframeEl = null;
 		this._unloaded = true;
 	};
-	window.Worker.prototype.addEventListener = function () {
-	};
-	window.Worker.prototype.removeEventListener = function () {
-	};
-	
+	window.Worker.prototype.addEventListener = function () {};
+	window.Worker.prototype.removeEventListener = function () {};
+
 	window.Worker.notNative = true;
-	window.Worker.iframeURI = './worker.iframe.html';
-	window.Worker.baseURI = '';
-}
+	window.Worker.iframeURI = 'about:blank';
+	window.Worker.baseURI = pathJoin(location.pathname,'');
+	if(nativeWorker){
+		window.Worker.nativeWorker = nativeWorker;
+	}
+})();
+
+})();
