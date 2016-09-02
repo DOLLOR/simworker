@@ -55,6 +55,7 @@ void(function(){
 		thisWorker._currentPath = pathJoin(window.Worker.baseURI,script);//pach
 		thisWorker._iframeEl = document.createElement('iframe');//iframe element
 		thisWorker._quere = [];
+		thisWorker._messageHandlers = [];
 		thisWorker._unloaded = false;
 
 		//styles
@@ -107,10 +108,33 @@ void(function(){
 			};
 			contentWindow.onmessage = contentWindow.onerror = null; // placeholder function
 			contentWindow.workerPostMessage = function (data) {
+				//dispatchEvent
 				if (typeof thisWorker.onmessage === 'function') {
 					thisWorker.onmessage.call(thisWorker,new MessageEvent(data,thisWorker));
 				}
+				for (var index = 0; index < thisWorker._messageHandlers.length; index++) {
+					var element = thisWorker._messageHandlers[index];
+					element.call(thisWorker,new MessageEvent(data,thisWorker));
+				}
 			};
+			//event management
+			contentWindow.addEventListener = function(evName,cb){
+				if(evName === 'message'){
+					contentWindow.addEventListener._messageHandlers.push(cb);
+				}
+			};
+			contentWindow.addEventListener._messageHandlers = [];
+			contentWindow.removeEventListener = function(evName,cb){
+				if(evName === 'message'){
+					for (var index = 0; index < contentWindow.addEventListener._messageHandlers.length; index++) {
+						var element = contentWindow.addEventListener._messageHandlers[index];
+						if(element===cb){
+							contentWindow.addEventListener._messageHandlers.splice(index,1);
+						}
+					}
+				}
+			};
+
 			contentWindow.workerClose = function () {
 				thisWorker.terminate();
 			};
@@ -163,14 +187,21 @@ void(function(){
 		;(document.head||document.getElementsByTagName('head')[0]).appendChild(this._iframeEl);
 	};
 	window.Worker.prototype.postMessage = function (obj) {
+		//dispatchEvent
 		var thisWorker = this;
 		setTimeout(function () {
 			thisWorker._quere.push(function () {
 				// IE8 throws an error if we call worker._iframeEl.contentWindow.onmessage() directly
 				var win = thisWorker._iframeEl.contentWindow;
+				var _messageHandlers = [].slice.call(thisWorker._iframeEl.contentWindow.addEventListener._messageHandlers,0);
 				if(win.onmessage){
 					win.onmessage.call(win,new MessageEvent(obj));
 				}
+				for (var index = 0; index < _messageHandlers.length; index++) {
+					var element = _messageHandlers[index];
+					element.call(win,new MessageEvent(obj));
+				}
+				_messageHandlers = undefined;
 			});
 		},0);
 	};
@@ -181,8 +212,23 @@ void(function(){
 		this._iframeEl = null;
 		this._unloaded = true;
 	};
-	window.Worker.prototype.addEventListener = function () {};
-	window.Worker.prototype.removeEventListener = function () {};
+
+	//event management
+	window.Worker.prototype.addEventListener = function (evName,cb) {
+		if(evName === 'message'){
+			this._messageHandlers.push(cb);
+		}
+	};
+	window.Worker.prototype.removeEventListener = function (evName,cb) {
+		if(evName === 'message'){
+			for (var index = 0; index < this._messageHandlers.length; index++) {
+				var element = this._messageHandlers[index];
+				if(element===cb){
+					this._messageHandlers.splice(index,1);
+				}
+			}
+		}
+	};
 
 	window.Worker.notNative = true;
 	window.Worker.iframeURI = 'about:blank';
