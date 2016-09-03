@@ -139,8 +139,11 @@ void(function(){
 				thisWorker.terminate();
 			};
 
+
 			// inject worker script into iframe
 			setTimeout(function(){
+				contentWindow['eval']('self.close = workerClose;self.postMessage = workerPostMessage;');
+				contentWindow['eval']('var close = workerClose;var postMessage = workerPostMessage;');
 				loadScript(toAbsPath(script));
 				thisWorker._quere.push = function (callback) {
 					if (!thisWorker._unloaded) {
