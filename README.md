@@ -30,14 +30,6 @@ Same as the native Web Workers, except a few things to note:
  
 1. Before initializing, set the path of IFRAME page that used to crate the 
    worker scope at `window.Worker.iframeURI`.
-2. The path of script for the native Web Workers is relative to the document
-   URL. Set `window.Worker.baseURI` to tell IFRAME where to find your script.
-3. Native Web Workers will be recycled automatically, simulated Worker lived
+2. Native Web Workers will be recycled automatically, simulated Worker lived
    in IFRAME that can only be removed by executing `worker.terminate()` 
    explicitly when you finish using Worker.
-4. IEs doesn't allow overwritten of `window.postMessage()`, so for a worker
-   script to work in both native worker and simulated in IE, create a new
-   variable at the very top of the worker script that points to the correct 
-   function:
-   `var send = (typeof workerPostMessage !== 'undefined')?workerPostMessage:postMessage;`
-   and use `send()` instead of `postMessage()` within the script.
